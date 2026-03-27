@@ -3,6 +3,7 @@
 #include <SPI.h>
 
 // V2.1 new features: FLASH memory write count optimization (detect empty space before erasing entire module), manual trigger logic optimization
+// New Omni V1 Beta features: Now supports bidirectional trigger mode to let PC becomes master device. Can we used to pair with python script to hook with Cygnus
 
 #define TRIG_PIN 2   // 輸入或輸出：MRI Trigger
 #define LED_IND  8   // 輸出：本地指示LED（確認trigger）
