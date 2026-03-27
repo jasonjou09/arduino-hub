@@ -43,7 +43,7 @@ int event_count_per_cycle = 400; // 每個cycle有幾個event(LED燈亮幾次)
 
 // --- 宣告FLASH物件 ---
 SPIFlash flash(FLASH_PIN);
-static int saved_to_sd = 0;
+bool saved_to_sd = 0;
 String FILE_NAME = "DATA_0.txt";
 int FILE_ORDER = 0;
 
@@ -161,13 +161,13 @@ void setup() {
   for (uint32_t addr = currentFlashAddr; addr <= 0x800000; addr += 0x100) {
     flash.readByteArray(addr, pageBuffer, BUFFER_SIZE); // 將 flash pages 讀取到記憶體內，我們直接借用已經宣告好的 pageBuffer
 
-    int clean = false;
+    bool clean = false;
     for (int i = 0; i < BUFFER_SIZE; i++) {
       if (pageBuffer[i] != 0xFF) {break;} // 只要偵測到一個不是0xFF就立刻跳過這個page的檢測,因為代表一定有東西 
       if (i == BUFFER_SIZE-1) {clean = true;} // 如果loop成功跑到最後就代表這個page是乾淨的,這個page往後都沒有寫過(因為都是順序讀寫)
     }
 
-    if (clean == true) { // 如果page為clean就代表找到乾淨的開頭了, 更新address開頭並結束初始化
+    if (clean) { // 如果page為clean就代表找到乾淨的開頭了, 更新address開頭並結束初始化
       currentFlashAddr = addr;
       readAddr = addr;
       break;
@@ -238,7 +238,7 @@ void loop() {
     }
     lastInputState = trigPinState;
   }
-  else if (~mode){ 
+  else if (!mode){ 
     if (currentMillis - lastTrigMillis >= 1UL && trigPinState == LOW) { // 當達到1毫秒且trig_pin還沒被調回去時調整trig_pin, 所以輸出的TRIG_OUT總共1毫秒長
       digitalWrite(TRIG_PIN, HIGH);
     }
@@ -258,7 +258,7 @@ void loop() {
         trig_flag = false;
         cycle_count = 0;
 
-        if (~mode) { // 當mode = 1時, 要輸出trigger, 同時記錄
+        if (!mode) { // 當mode = 1時, 要輸出trigger, 同時記錄
           digitalWrite(TRIG_PIN, LOW);
           lastTrigMillis = currentMillis;
           saveToFlashBuffer(currentMillis, 0, 1);
@@ -330,7 +330,7 @@ void loop() {
       break;
 
     case FINISHED:
-      if (saved_to_sd == 0) {
+      if (!saved_to_sd) {
         //Serial.println(counter);
         Serial.println(F("Trigger Finished. Saving Data to SD card..."));
         dumpFlashToSD();
