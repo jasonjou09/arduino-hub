@@ -2,8 +2,9 @@
 #include <SD.h>
 #include <SPI.h>
 
-// V2.1 new features: FLASH memory write count optimization (detect empty space before erasing entire module), manual trigger logic optimization
 // New Omni V1 Beta features: Now supports bidirectional trigger mode to let PC becomes master device. Can we used to pair with python script to hook with Cygnus
+// Omni V2.1 Beta features: Now fully works in match with the python file on PC side.
+// Omni V2.1 Beta needs to pair with arduino_logger_v2.1.py
 
 #define TRIG_PIN 2   // 輸入或輸出：MRI Trigger
 #define LED_IND  8   // 輸出：本地指示LED（確認trigger）
@@ -35,11 +36,11 @@ volatile bool trig_flag = false;
 
 // --- 設定sequence樣態 ---
 // sequence時間總長計算方式: init_rest_time + seq元素總數*(event_dur*event_count_per_cycle + rest_time)，單位為毫秒
-unsigned long init_rest_time = 10UL; // 初始rest的目的是為了抵銷掉MRI的dummy scan trigger和實際掃描之間的時間誤差、等待初始不可用的100秒跑完，並且再收集沒刺激過的reference數據，一共約45 + 100 + 30 ~ 175秒
-unsigned long rest_time = 10UL; // 每個cycle的rest time長度
-unsigned long seq[] = {1UL, 2UL, 1UL, 2UL}; // 總共有幾個cycle，依順序每個cycle的光刺激時長(LED燈開啟的時間)是多久
-unsigned long event_dur = 30UL; // 每次刺激的event的總長度為多少(兩次LED開啟的時間間隔)
-int event_count_per_cycle = 400; // 每個cycle有幾個event(LED燈亮幾次)
+unsigned long init_rest_time = 1000UL; // 初始rest的目的是為了抵銷掉MRI的dummy scan trigger和實際掃描之間的時間誤差、等待初始不可用的100秒跑完，並且再收集沒刺激過的reference數據，一共約45 + 100 + 30 ~ 175秒
+unsigned long rest_time = 1000UL; // 每個cycle的rest time長度
+unsigned long seq[] = {1UL, 10UL, 1UL, 10UL}; // 總共有幾個cycle，依順序每個cycle的光刺激時長(LED燈開啟的時間)是多久
+unsigned long event_dur = 100UL; // 每次刺激的event的總長度為多少(兩次LED開啟的時間間隔)
+int event_count_per_cycle = 30; // 每個cycle有幾個event(LED燈亮幾次)
 
 // --- 宣告FLASH物件 ---
 SPIFlash flash(FLASH_PIN);
@@ -144,6 +145,8 @@ void onFalling() {
 void setup() {
   Serial.begin(115200);
 
+  delay(1000UL); // Prevent the message from bursting out and thus missed by PC terminal
+
   // 1. 初始化 SD
   Serial.print(F("Init SD card..."));
   if (!SD.begin(SD_PIN)) {
@@ -167,7 +170,7 @@ void setup() {
       if (i == BUFFER_SIZE-1) {clean = true;} // 如果loop成功跑到最後就代表這個page是乾淨的,這個page往後都沒有寫過(因為都是順序讀寫)
     }
 
-    if (clean) { // 如果page為clean就代表找到乾淨的開頭了, 更新address開頭並結束初始化
+    if (clean == true) { // 如果page為clean就代表找到乾淨的開頭了, 更新address開頭並結束初始化
       currentFlashAddr = addr;
       readAddr = addr;
       break;
@@ -180,6 +183,8 @@ void setup() {
   Serial.println(F("Flash Ready. Starting at address:"));
   Serial.println(readAddr);
   
+  delay(2000); // This part will let PC have time to communicate and shake hands with Arduino, because Python script will treat responding next question as shake hands.
+
   // Request user to input com mode.
   Serial.println(F("Please enter com mode: (0 = PC is master/1 = PC is slave)"));
   while (Serial.available() == 0) {}
@@ -221,7 +226,7 @@ void setup() {
 
   Serial.println(F("Initialization done."));
 
-  Serial.println(F("System ready — waiting for first trigger..."));
+  Serial.println(F("Sys ready — waiting for TRG."));
 }
 
 void loop() {
@@ -258,7 +263,7 @@ void loop() {
         trig_flag = false;
         cycle_count = 0;
 
-        if (!mode) { // 當mode = 1時, 要輸出trigger, 同時記錄
+        if (!mode) { // 當mode = 0時, 要輸出trigger, 同時記錄
           digitalWrite(TRIG_PIN, LOW);
           lastTrigMillis = currentMillis;
           saveToFlashBuffer(currentMillis, 0, 1);
@@ -330,7 +335,7 @@ void loop() {
       break;
 
     case FINISHED:
-      if (!saved_to_sd) {
+      if (saved_to_sd == 0) {
         //Serial.println(counter);
         Serial.println(F("Trigger Finished. Saving Data to SD card..."));
         dumpFlashToSD();
@@ -350,14 +355,13 @@ void loop() {
       saved_to_sd = 0;
       digitalWrite(LED_IND, LOW);
       digitalWrite(OUT_PIN, LOW);
-      Serial.println(F("Reset command received — all outputs OFF."));
+      Serial.println(F("Reset CMD received — kill all process and reset to wait for trigger."));
     }
     else if (c == 's' && currentState == IDLE) {
       // 確定是IDLE state後, 就啟動trig flag, 下一次loop進入IDLE state就會啟動偵測
         trig_flag = true;
     }
   }
-
-  previousMillis = currentMillis;
   //counter++;
+  previousMillis = currentMillis;
 }
