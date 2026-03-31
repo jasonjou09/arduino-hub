@@ -3,15 +3,21 @@ import threading
 import time
 from datetime import datetime
 import csv
-from pylsl import StreamInlet, resolve_streams
+from pylsl.pylsl import StreamInlet, resolve_stream
 
 # === 設定區 ===
+ARDUINO_ONLY_MODE = True
 PORT = 'COM3'
 BAUD_RATE = 115200
+ARDUINO_SHAKE_HAND_PROMPT = ["Please enter com mode: (0 = PC is master/1 = PC is slave)",
+                             "Sys ready — waiting for TRG.",
+                             "Reset CMD received — kill all process and reset to wait for trigger."]
 # ============
 
 log_data = []  # 儲存 Log 的列表
 is_running = True  # 控制執行緒的開關
+arduino_ready = False # 讓主程序知道Arduino已經準備就緒
+lsl_ready = False # 讓主程序知道EEG已經開始收錄
 
 
 def get_timestamp():
@@ -21,7 +27,8 @@ def get_timestamp():
 
 def listen_to_arduino(ser):
     """背景執行緒 1：專職監聽 Arduino 傳來的資訊"""
-    global is_running
+    global is_running, arduino_ready, lsl_ready, ARDUINO_SHAKE_HAND_PROMPT, log_data
+
     while is_running:
         try:
             if ser.in_waiting > 0:
@@ -37,26 +44,42 @@ def listen_to_arduino(ser):
                     log_data.append([recv_time, "RX (Arduino)", msg])
                     print(f"\r[{recv_time}] [Arduino 回傳]: {msg}\n> ", end="", flush=True)
 
+                    # The below is for Python to shake hand with Arduino
+                    if msg == ARDUINO_SHAKE_HAND_PROMPT[0]:
+                        ser.write('0\n'.encode('utf-8'))
+                        log_data.append([recv_time, "SYSTEM", "系統已自動將模式設為 mode 0 (PC is master)"])
+                        print(f"\r[{recv_time}] 系統已自動將模式設為 mode 0 (PC is master)")
+                        continue
+
+                    elif msg == ARDUINO_SHAKE_HAND_PROMPT[1]:
+                        arduino_ready = True
+                        continue
+
+                    elif msg == ARDUINO_SHAKE_HAND_PROMPT[2]:
+                        arduino_ready = True
+                        time.sleep(1)
+                continue
+
+            # The if statement is for when both conditions are met then starting scan
+            if arduino_ready and lsl_ready:
+                ser.write('s\n'.encode('utf-8'))
+                recv_time = get_timestamp()
+                log_data.append([recv_time, "SYSTEM", "系統已經自動觸發 Arduino Trigger"])
+                print(f"\r[{recv_time}] 系統已經自動觸發 Arduino Trigger)")
+                arduino_ready = False
+
         except serial.SerialException:
             print("\n[錯誤] 失去與 Arduino 的連線。")
             is_running = False
             break
 
-        time.sleep(0.001)
+        time.sleep(0.0005)
 
 
-def listen_to_lsl():
+def listen_to_lsl(inlet):
     """背景執行緒 2：專職監聽 LSL EEG 訊號"""
-    global is_running
-
-    print("\n[系統] 正在尋找區網內的 EEG stream...")
-    # 注意：這裡會卡住直到找到 LSL Stream 為止
-    streams = resolve_stream('type', 'EEG')
-    inlet = StreamInlet(streams[0])
-
-    start_time = get_timestamp()
-    print(f"[{start_time}] [系統] 成功連接 EEG Stream！開始背景紀錄資料...")
-    print("> ", end="", flush=True)  # 恢復輸入提示字元
+    global is_running, arduino_ready, lsl_ready, log_data
+    lsl_ready = True # 進入這個function就代表lsl成功收到訊號了
 
     while is_running:
         # 使用 timeout 參數，確保即使沒有資料，迴圈也能繼續運行並檢查 is_running 狀態
@@ -75,31 +98,59 @@ def listen_to_lsl():
             log_data.append([sys_time, "RX (EEG)", data_str])
 
 
-def main():
-    global is_running
-
-    # --- 1. 初始化 Arduino 連線 ---
-    print(f"正在嘗試連接 {PORT} (Baud: {BAUD_RATE})...")
+def starting_arduino(port, baud_rate):
+    print(f"正在嘗試連接 {port} (Baud: {baud_rate})...")
     try:
-        ser = serial.Serial(PORT, BAUD_RATE, timeout=0.01)
-        time.sleep(2)
-        ser.reset_input_buffer()
+        ser = serial.Serial(port, baud_rate, timeout=0.01)
+        time.sleep(0.2)
     except Exception as e:
         print(f"連線失敗，請確認 Arduino 是否接上且未被佔用。\n錯誤訊息: {e}")
-        return
+        time.sleep(2)
+        return starting_arduino(port, baud_rate)
 
+    # After successfully starting arduino
     sys_start = get_timestamp()
     log_data.append([sys_start, "SYSTEM", f"已成功連接 Arduino ({PORT})"])
-    print(f"[{sys_start}] Arduino 連接成功！")
-
-    # --- 2. 啟動背景執行緒 ---
-    # 啟動 LSL 執行緒 (會先尋找 Stream)
-    lsl_thread = threading.Thread(target=listen_to_lsl, daemon=True)
-    lsl_thread.start()
+    print(f"[{sys_start}] [系統] Arduino 連接成功！")
 
     # 啟動 Arduino 監聽執行緒
     arduino_thread = threading.Thread(target=listen_to_arduino, args=(ser,), daemon=True)
     arduino_thread.start()
+
+    return ser, arduino_thread
+
+
+def starting_lsl():
+    print("\n[系統] 正在尋找區網內的 EEG stream...")
+    # 注意：這裡會卡住直到找到 LSL Stream 為止
+    streams = resolve_stream('type', 'EEG')
+    inlet = StreamInlet(streams[0])
+
+    sys_start = get_timestamp()
+    log_data.append([sys_start, "SYSTEM", "已成功連接 EEG"])
+    print(f"[{sys_start}] [系統] 成功連接 EEG Stream！開始背景紀錄資料...")
+    print("> ", end="", flush=True)  # 恢復輸入提示字元
+
+    # 啟動 LSL 執行緒
+    lsl_thread = threading.Thread(target=listen_to_lsl, args=(inlet,), daemon=True)
+    lsl_thread.start()
+
+    return inlet, lsl_thread
+
+
+def main():
+    global is_running, arduino_ready, lsl_ready, log_data
+
+    # --- 1. 初始化 Arduino 連線 ---
+    [ser, arduino_thread] = starting_arduino(PORT, BAUD_RATE)
+
+    time.sleep(5) # Let main thread sleep for 5 seconds in case all commands are crammed together
+
+    # --- 2. 啟動 LSL 執行緒 ---
+    if not ARDUINO_ONLY_MODE:
+        [inlet, lsl_thread] = starting_lsl()
+    else:
+        lsl_ready = True
 
     # --- 3. 主執行緒：處理使用者輸入 ---
     print("--------------------------------------------------")
@@ -130,7 +181,8 @@ def main():
 
     # 留一點時間讓背景執行緒跑完最後一圈並安全結束
     arduino_thread.join(timeout=0.5)
-    lsl_thread.join(timeout=0.5)
+    if not ARDUINO_ONLY_MODE:
+        lsl_thread.join(timeout=0.5)
     ser.close()
 
     # 以當下系統時間建立檔名
@@ -142,7 +194,7 @@ def main():
         writer.writerow(["Timestamp (System)", "Source", "Message / Data"])
         writer.writerows(log_data)
 
-    print(f"✅ 完美收工！所有數據皆已同步儲存至: {filename}")
+    print(f"✅ 所有數據皆已同步儲存至: {filename}")
 
 
 if __name__ == "__main__":
