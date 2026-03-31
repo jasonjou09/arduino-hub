@@ -38,6 +38,13 @@ The data structure that is saved inside SRAM buffer and Flash module are like th
 
 Event type: 0 is external trigger, 1 is LED output, 2 is electric stimulation.
 
+### Hardware Components
+* Main board: Arduino UNO 3
+* The Flash module: W25Q64 8MiB Module
+* [The SD card module](https://jin-hua.com.tw/page/product/show.aspx?num=13038&lang=TW)
+* FR120N Separated MOSFET Switches
+* A BNC Connector connecting to MRI/Cyrix
+
 
 ## Part II : Python Environment & Scripts
 **arduino_logger.py**: It is the simplest version of environment that can communicate with Arduino, however it lacks any pylsl functionality so **it can't communicate with StEEG**. Also it does not have any automatic hand-shake protocol with Arduino. So everything is manual. But it is compatible with any Arduino scripts.
@@ -50,6 +57,7 @@ How to use them: Plug in the Arduino into PC, inject the Arduino with the desire
 Your Python environment needs to have pyserial and pylsl installed.
 
 `pip install pyserial`
+
 `pip install pylsl`
 
-After installation, inside the lib folder, there is a script called pylsl.py. Download and move the script into the `.venv\pylsl\lib` folder. Done.
+After installation, inside the lib folder, there is a script called pylsl.py. Download and move the script into the `Lib\site-packages\pylsl\lib` folder. Done.
