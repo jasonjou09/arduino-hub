@@ -270,6 +270,7 @@ void loop() {
         }
 
         currentState = REST0;
+        previousMillis = currentMillis;
       }
 
       break;
@@ -283,6 +284,7 @@ void loop() {
         digitalWrite(LED_IND, HIGH);
         digitalWrite(OUT_PIN, HIGH);
         currentState = BLINK_ON;
+        previousMillis = currentMillis;
       }
 
       break;
@@ -302,6 +304,7 @@ void loop() {
         else {
           currentState = FINISHED; // 系統發現預定seq已經做完, 刺激結束
         }
+        previousMillis = currentMillis;
       }
 
       break;
@@ -313,6 +316,7 @@ void loop() {
         digitalWrite(OUT_PIN, LOW);
         currentState = BLINK_OFF;
         saveToFlashBuffer(previousMillis, 1, lowByte(seq[cycle_count])); //讓系統紀錄previousMillis才不會低估後面的休息時間, lowByte提取unsigned long裡面末尾一個byte的資訊
+        previousMillis = currentMillis;
       }
 
       break;
@@ -330,6 +334,7 @@ void loop() {
         else {
           currentState = REST;
         }
+        previousMillis = currentMillis;
       }
 
       break;
@@ -340,6 +345,7 @@ void loop() {
         Serial.println(F("Trigger Finished. Saving Data to SD card..."));
         dumpFlashToSD();
         saved_to_sd = 1;
+        previousMillis = currentMillis;
       }
 
       break;
@@ -360,8 +366,8 @@ void loop() {
     else if (c == 's' && currentState == IDLE) {
       // 確定是IDLE state後, 就啟動trig flag, 下一次loop進入IDLE state就會啟動偵測
         trig_flag = true;
+        previousMillis = currentMillis;
     }
   }
   //counter++;
-  previousMillis = currentMillis;
 }
