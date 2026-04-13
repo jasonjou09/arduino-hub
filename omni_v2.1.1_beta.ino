@@ -4,7 +4,8 @@
 
 // New Omni V1 Beta features: Now supports bidirectional trigger mode to let PC becomes master device. Can we used to pair with python script to hook with Cygnus
 // Omni V2.1 Beta features: Now fully works in match with the python file on PC side.
-// Omni V2.1 Beta needs to pair with arduino_logger_v2.1.py
+// Omni V2.1.1 Beta features: Added the feature of customize filename to prevent unwanted overwrite. Also default pinstate is set to LOW to prevent mismatch.
+// Omni V2.1.1 Beta needs to pair with arduino_logger_v2.1.1.py
 
 #define TRIG_PIN 2   // 輸入或輸出：MRI Trigger
 #define LED_IND  8   // 輸出：本地指示LED（確認trigger）
@@ -36,16 +37,17 @@ volatile bool trig_flag = false;
 
 // --- 設定sequence樣態 ---
 // sequence時間總長計算方式: init_rest_time + seq元素總數*(event_dur*event_count_per_cycle + rest_time)，單位為毫秒
-unsigned long init_rest_time = 1000UL; // 初始rest的目的是為了抵銷掉MRI的dummy scan trigger和實際掃描之間的時間誤差、等待初始不可用的100秒跑完，並且再收集沒刺激過的reference數據，一共約45 + 100 + 30 ~ 175秒
-unsigned long rest_time = 1000UL; // 每個cycle的rest time長度
+unsigned long init_rest_time = 10000UL; // 初始rest的目的是為了抵銷掉MRI的dummy scan trigger和實際掃描之間的時間誤差、等待初始不可用的100秒跑完，並且再收集沒刺激過的reference數據，一共約45 + 100 + 30 ~ 175秒
+unsigned long rest_time = 10000UL; // 每個cycle的rest time長度
 unsigned long seq[] = {1UL, 10UL, 1UL, 10UL}; // 總共有幾個cycle，依順序每個cycle的光刺激時長(LED燈開啟的時間)是多久
 unsigned long event_dur = 100UL; // 每次刺激的event的總長度為多少(兩次LED開啟的時間間隔)
-int event_count_per_cycle = 30; // 每個cycle有幾個event(LED燈亮幾次)
+int event_count_per_cycle = 100; // 每個cycle有幾個event(LED燈亮幾次)
 
 // --- 宣告FLASH物件 ---
 SPIFlash flash(FLASH_PIN);
 bool saved_to_sd = 0;
-String FILE_NAME = "DATA_0.txt";
+char FILE_NAME[12];
+char FILE_PREFIX[7];
 int FILE_ORDER = 0;
 
 // --- 緩衝區設定 ---
@@ -104,7 +106,7 @@ void dumpFlashToSD() {
         dataFile.print(ts); dataFile.print(",");
         dataFile.print(type); dataFile.print(",");
         dataFile.println(state);
-  }
+    }
       
       readAddr += PAGE_SIZE;
     }
@@ -126,7 +128,7 @@ void dumpFlashToSD() {
     // 重置buffer，步進一次儲存到SD Card的檔案名稱
     bufferIndex = 0;
     FILE_ORDER += 1;
-    FILE_NAME = "DATA_" + String(FILE_ORDER) + ".txt";
+    sprintf(FILE_NAME, "%s_%d.txt", FILE_PREFIX, FILE_ORDER);
     
     // 擦除 Flash 準備下一次使用 (Block Erase 比較快)
     // 這裡我們選擇只把指標歸零，實務上建議在此時執行 eraseChip 或 eraseSector
@@ -185,6 +187,28 @@ void setup() {
   
   delay(2000); // This part will let PC have time to communicate and shake hands with Arduino, because Python script will treat responding next question as shake hands.
 
+  // Request user to input data file name
+  Serial.println(F("Please enter file name prefix:(Max 6 Char)"));
+  while (Serial.available() == 0) {}
+
+  int index = 0;
+  while(index < 7) {
+    if (Serial.available() > 0) {
+      char c = Serial.read();
+      // 如果讀到換行符號就停止
+      if (c == '\n' || c == '\r' || index >= 6) break;
+      FILE_PREFIX[index++] = c;
+    }
+  }
+  FILE_PREFIX[index] = '\0';
+  strcpy(FILE_NAME, FILE_PREFIX);
+  strcat(FILE_NAME, "_0.txt");
+
+
+  Serial.println(FILE_NAME);
+
+  delay(500);
+
   // Request user to input com mode.
   Serial.println(F("Please enter com mode: (0 = PC is master/1 = PC is slave)"));
   while (Serial.available() == 0) {}
@@ -237,7 +261,7 @@ void loop() {
   // The below block is to check for TRIG_PIN state (different for different mode, so an if statement)
   int trigPinState = digitalRead(TRIG_PIN); // 讀取這次的數據, 與mode為何無關
   if (mode){
-    static int lastInputState = HIGH; // 定義一個函數紀錄上次輸入的狀態
+    static int lastInputState = LOW; // 定義一個函數紀錄上次輸入的狀態
     if (trigPinState == LOW && lastInputState == HIGH) {
       saveToFlashBuffer(currentMillis, 0, 1); // 狀態切換時計算外部trigger
     }
