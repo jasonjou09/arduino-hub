@@ -6,15 +6,18 @@ import csv
 from pylsl.pylsl import StreamInlet, resolve_stream
 
 # === 設定區 ===
+COM_MODE = 0 # 0 is PC being master/ 1 is PC being slave
 ARDUINO_ONLY_MODE = True
 PORT = 'COM3'
 BAUD_RATE = 115200
-ARDUINO_SHAKE_HAND_PROMPT = ["Please enter com mode: (0 = PC is master/1 = PC is slave)",
+ARDUINO_SHAKE_HAND_PROMPT = ["Please enter file name prefix:(Max 6 Char)",
+                             "Please enter com mode: (0 = PC is master/1 = PC is slave)",
                              "Sys ready — waiting for TRG.",
                              "Reset CMD received — kill all process and reset to wait for trigger."]
 # ============
 
 log_data = []  # 儲存 Log 的列表
+eeg_data = [] # 儲存EEG的數據
 is_running = True  # 控制執行緒的開關
 arduino_ready = False # 讓主程序知道Arduino已經準備就緒
 lsl_ready = False # 讓主程序知道EEG已經開始收錄
@@ -46,22 +49,32 @@ def listen_to_arduino(ser):
 
                     # The below is for Python to shake hand with Arduino
                     if msg == ARDUINO_SHAKE_HAND_PROMPT[0]:
-                        ser.write('0\n'.encode('utf-8'))
-                        log_data.append([recv_time, "SYSTEM", "系統已自動將模式設為 mode 0 (PC is master)"])
-                        print(f"\r[{recv_time}] 系統已自動將模式設為 mode 0 (PC is master)")
+                        file_prefix = recv_time[5:13]
+                        file_prefix = file_prefix.replace(" ", "")
+                        file_prefix = file_prefix.replace(":", "")
+                        file_prefix = file_prefix.replace("-", "")
+                        ser.write((file_prefix + '\n').encode('utf-8'))
+                        log_data.append([recv_time, "SYSTEM", "系統已自動將檔名前綴設為 " + file_prefix])
+                        print(f"\r[{recv_time}] 系統已自動將模式設為 系統已自動將檔名前綴設為 " + file_prefix)
                         continue
 
                     elif msg == ARDUINO_SHAKE_HAND_PROMPT[1]:
-                        arduino_ready = True
+                        ser.write((str(COM_MODE) + '\n').encode('utf-8'))
+                        log_data.append([recv_time, "SYSTEM", "系統已自動將模式設為 mode " + str(COM_MODE) + " (PC is master)"])
+                        print(f"\r[{recv_time}] 系統已自動將模式設為 mode " + str(COM_MODE) + " (PC is master)")
                         continue
 
                     elif msg == ARDUINO_SHAKE_HAND_PROMPT[2]:
+                        arduino_ready = True
+                        continue
+
+                    elif msg == ARDUINO_SHAKE_HAND_PROMPT[3]:
                         arduino_ready = True
                         time.sleep(1)
                 continue
 
             # The if statement is for when both conditions are met then starting scan
-            if arduino_ready and lsl_ready:
+            if (arduino_ready and lsl_ready) and (not COM_MODE):
                 ser.write('s\n'.encode('utf-8'))
                 recv_time = get_timestamp()
                 log_data.append([recv_time, "SYSTEM", "系統已經自動觸發 Arduino Trigger"])
@@ -95,7 +108,7 @@ def listen_to_lsl(inlet):
             data_str = f"LSL_TS: {lsl_timestamp:.5f} | Data: {sample}"
 
             # 存入 Log，但不印在畫面上以免洗版
-            log_data.append([sys_time, "RX (EEG)", data_str])
+            eeg_data.append([sys_time, "RX (EEG)", data_str])
 
 
 def starting_arduino(port, baud_rate):
@@ -187,6 +200,7 @@ def main():
 
     # 以當下系統時間建立檔名
     filename = datetime.now().strftime("Sync_Log_%Y%m%d_%H%M%S.csv")
+    filename_eeg = datetime.now().strftime("EEG_Log_%Y%m%d_%H%M%S.csv")
 
     # 寫入 CSV
     with open(filename, mode='w', newline='', encoding='utf-8-sig') as f:
@@ -194,7 +208,13 @@ def main():
         writer.writerow(["Timestamp (System)", "Source", "Message / Data"])
         writer.writerows(log_data)
 
-    print(f"✅ 所有數據皆已同步儲存至: {filename}")
+    if eeg_data:
+        with open(filename_eeg, mode='w', newline='', encoding='utf-8-sig') as f:
+            writer = csv.writer(f)
+            writer.writerow(["Timestamp (System)", "Source", "Message / Data"])
+            writer.writerows(eeg_data)
+
+    print(f"✅ 所有數據皆已同步儲存至: {filename} 和 {filename_eeg}")
 
 
 if __name__ == "__main__":
