@@ -6,8 +6,8 @@ import csv
 from pylsl.pylsl import StreamInlet, resolve_stream
 
 # === 設定區 ===
-COM_MODE = 0 # 0 is PC being master/ 1 is PC being slave
-ARDUINO_ONLY_MODE = True
+COM_MODE = 1 # 0 is PC being master/ 1 is PC being slave
+ARDUINO_ONLY_MODE = False
 PORT = 'COM3'
 BAUD_RATE = 115200
 ARDUINO_SHAKE_HAND_PROMPT = ["Please enter file name prefix:(Max 6 Char)",
@@ -141,8 +141,18 @@ def starting_lsl():
 
     sys_start = get_timestamp()
     log_data.append([sys_start, "SYSTEM", "已成功連接 EEG"])
-    print(f"[{sys_start}] [系統] 成功連接 EEG Stream！開始背景紀錄資料...")
+    print(f"[{sys_start}] [系統] 成功連接 EEG Stream！等待 Start Marker...")
     print("> ", end="", flush=True)  # 恢復輸入提示字元
+
+    streams_0 = resolve_stream('type', 'Markers')
+    inlet_0 = StreamInlet(streams_0[0])
+    while True:
+        sample, lsl_timestamp = inlet.pull_sample()
+        sys_start = get_timestamp()
+        log_data.append([sys_start, "SYSTEM", f"已於 {lsl_timestamp} 接收到 EEG Marker: {sample[0]}"])
+        print(f"[{sys_start}] [系統] 已於LSL Time: {lsl_timestamp} 接收到EEG Marker: {sample[0]}，開始背景紀錄資料...")
+        print("> ", end="", flush=True)  # 恢復輸入提示字元
+        break
 
     # 啟動 LSL 執行緒
     lsl_thread = threading.Thread(target=listen_to_lsl, args=(inlet,), daemon=True)
